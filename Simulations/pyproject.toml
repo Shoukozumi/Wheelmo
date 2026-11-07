@@ -1,0 +1,38 @@
+[project]
+name = "wheelmo-sim"
+version = "0.1.0"
+description = "Isaac Lab simulation of an autonomous wheelchair (360 deg LiDAR + 2x 1080p cameras) in a cluttered corridor"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "isaaclab==3.0.0",
+    "torch==2.11.0",
+    "torchvision==0.26.0",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu130" }
+torchvision = { index = "pytorch-cu130" }
+isaaclab = { index = "nvidia" }
+
+[[tool.uv.index]]
+name = "nvidia"
+url = "https://pypi.nvidia.com/"
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.uv]
+# Isaac Lab's dependencies are split across pypi.nvidia.com, the PyTorch CUDA index and PyPI.
+index-strategy = "unsafe-best-match"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+# dash (pulled in by an Isaac Lab dependency) registers a pytest plugin that only emits warnings
+addopts = ["-p", "no:dash"]
