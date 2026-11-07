@@ -83,12 +83,34 @@ def main() -> None:
     )
     with launch_simulation(LaunchCfg(sim=sim_cfg, scene=scene_cfg), args_cli):
         sim = sim_utils.SimulationContext(sim_cfg)
-        sim.set_camera_view(eye=(-1.5, -2.5, 3.0), target=(3.0, 0.0, 0.5))
         scene = InteractiveScene(scene_cfg)
+        # set after the scene exists so env 0's origin is known; applied when the viewer starts in sim.reset()
+        sim.set_camera_view(*birdseye_view(corridor, scene.env_origins[0].tolist()))
         sim.reset()
         print(f"[INFO] Corridor seed {corridor.seed}: {len(layout.obstacles)} obstacles, "
               f"{corridor.width:.2f} m wide, doorways at x={list(corridor.doorway_x)}")
         run(sim, scene, chair, layout)
+
+
+VIEWER_VFOV_DEG = 65.0  # Newton GL viewer default: 12 mm focal length on USD's 15.29 mm vertical aperture
+VIEWER_ASPECT = 16.0 / 9.0  # default 1920x1080 window
+
+
+def birdseye_view(corridor: CorridorSpec, origin: list[float], margin: float = 0.5):
+    """Viewer (eye, target) looking down on the whole corridor of the environment at ``origin``.
+
+    The corridor runs along +x, so it should fill the window's wide (horizontal) axis. The viewer orients itself
+    by yaw/pitch and clamps pitch at 89 deg, so the camera tilts 1 deg off vertical, with the eye slightly on the
+    -y side of the target. That makes +y screen-up and +x screen-right: the corridor runs left to right, start on
+    the left. The height is the lowest at which the tops of the end walls (the closest points to the camera)
+    still fit the window width.
+    """
+    half_length = 0.5 * corridor.length + corridor.wall_thickness + margin
+    tan_half_hfov = math.tan(math.radians(0.5 * VIEWER_VFOV_DEG)) * VIEWER_ASPECT
+    height = corridor.wall_height + half_length / tan_half_hfov
+    target = (origin[0] + 0.5 * corridor.length, origin[1], origin[2])
+    eye = (target[0], target[1] - height * math.tan(math.radians(1.0)), target[2] + height)
+    return eye, target
 
 
 def planar_to_base(offset_xy: torch.Tensor, root_quat: torch.Tensor) -> torch.Tensor:
