@@ -29,16 +29,23 @@ parser.add_argument("--cmd", type=float, nargs=2, default=(0.3, 0.0), metavar=("
 parser.add_argument("--save_every", type=int, default=0, help="Save sensor images every N control steps (0 = off).")
 parser.add_argument("--output_dir", type=Path, default=Path("outputs"), help="Where --save_every writes images.")
 parser.add_argument("--render_hz", type=float, default=30.0, help="Viewer refresh rate (only with --viz).")
+parser.add_argument("--software_gl", action="store_true", help="Rasterise the viewer on the CPU (llvmpipe) instead of the GPU.")
 add_launcher_args(parser)
 args_cli = parser.parse_args()
 
-# OpenGL viewer under WSL2: WSLg's Mesa D3D12 driver defaults to the first adapter, which on hybrid-graphics
-# laptops is the integrated GPU. Prefer the NVIDIA GPU unless the user already picked an adapter.
-if "microsoft" in platform.release().lower():
-    os.environ.setdefault("MESA_D3D12_DEFAULT_ADAPTER_NAME", "NVIDIA")
-if "newton_gl" in str(args_cli.visualizer) and os.environ.get("LIBGL_ALWAYS_SOFTWARE", "0").lower() not in ("0", "false", "no", ""):
-    print("[WARN] LIBGL_ALWAYS_SOFTWARE is set, so the viewer window is rasterised on the CPU (llvmpipe), not the GPU. "
-          "Run with LIBGL_ALWAYS_SOFTWARE=0 to use the GPU for the viewer.")
+# OpenGL viewer setup. These variables are read when the viewer creates its OpenGL context, so changing them
+# here affects only this process, never the user's shell or other apps.
+USE_GL_VIEWER = "newton_gl" in str(args_cli.visualizer)
+if USE_GL_VIEWER:
+    if args_cli.software_gl:
+        os.environ["LIBGL_ALWAYS_SOFTWARE"] = "1"
+    elif os.environ.pop("LIBGL_ALWAYS_SOFTWARE", "0").lower() not in ("0", "false", "no", ""):
+        print("[INFO] Ignoring LIBGL_ALWAYS_SOFTWARE from the environment so the viewer renders on the GPU "
+              "(pass --software_gl to render it on the CPU instead).")
+    # WSL2: WSLg's Mesa D3D12 driver defaults to the first adapter, which on hybrid-graphics laptops is the
+    # integrated GPU. Prefer the NVIDIA GPU unless the user already picked an adapter.
+    if "microsoft" in platform.release().lower():
+        os.environ.setdefault("MESA_D3D12_DEFAULT_ADAPTER_NAME", "NVIDIA")
 
 import torch  # noqa: E402
 from isaaclab_newton.physics import MJWarpSolverCfg, NewtonCfg  # noqa: E402
@@ -87,9 +94,21 @@ def main() -> None:
         # set after the scene exists so env 0's origin is known; applied when the viewer starts in sim.reset()
         sim.set_camera_view(*birdseye_view(corridor, scene.env_origins[0].tolist()))
         sim.reset()
+        if USE_GL_VIEWER:
+            print(f"[INFO] Viewer OpenGL renderer: {gl_renderer()}")
         print(f"[INFO] Corridor seed {corridor.seed}: {len(layout.obstacles)} obstacles, "
               f"{corridor.width:.2f} m wide, doorways at x={list(corridor.doorway_x)}")
         run(sim, scene, chair, layout)
+
+
+def gl_renderer() -> str:
+    """OpenGL renderer string of the viewer's context, e.g. ``D3D12 (NVIDIA GeForce RTX 4060 Laptop GPU)``."""
+    try:
+        from pyglet.gl import gl_info  # noqa: PLC0415
+
+        return gl_info.get_renderer()
+    except Exception as exc:  # noqa: BLE001 - purely informational
+        return f"unknown ({exc})"
 
 
 VIEWER_VFOV_DEG = 65.0  # Newton GL viewer default: 12 mm focal length on USD's 15.29 mm vertical aperture

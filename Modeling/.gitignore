@@ -1,0 +1,12 @@
+__pycache__/
+
+# Raw phone scan: model.obj is 188 MB (over GitHub's 100 MB file limit) and the cleaned STL 53 MB.
+# Keep them out of git; share via Git LFS or a shared drive. See README.md "Scan files".
+staxi/scan/*
+!staxi/scan/README.md
+
+# Caches rebuilt from the cleaned scan (scan_tools.py, skeleton.py, tube_paths.py)
+staxi/data/
+
+# Isaac USD: rebuilt by make_usd.sh, and tied to the Isaac Lab version that made it
+staxi/out/usd/

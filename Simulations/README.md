@@ -36,15 +36,19 @@ at 30 Hz, and about 0.6× real time with the viewer open. Startup takes about 30
 
 ### Viewer on WSL2
 
+The viewer opens with a bird's-eye view of environment 0's corridor: start on the left, end on the right
+(`birdseye_view()` in `run_corridor.py`). Orbit, pan and zoom with the mouse as usual.
+
 Physics, LiDAR and cameras always run on the NVIDIA GPU through CUDA. Only the `--viz newton_gl` window uses
 OpenGL, and under WSLg that has some traps:
 
-- `LIBGL_ALWAYS_SOFTWARE=1` (set in `~/.profile` on the dev laptop) forces OpenGL onto the CPU. Run with
-  `LIBGL_ALWAYS_SOFTWARE=0 uv run python run_corridor.py --viz newton_gl` to use the GPU. The script prints a
-  warning when it detects the variable.
+- `LIBGL_ALWAYS_SOFTWARE=1` (set in `~/.profile` on the dev laptop) would force OpenGL onto the CPU.
+  `run_corridor.py` ignores it for its own process and says so. Pass `--software_gl` to render the viewer on
+  the CPU anyway.
 - On hybrid-graphics laptops WSLg defaults to the integrated GPU. `run_corridor.py` sets
-  `MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA` unless you set it yourself. Check with
-  `LIBGL_ALWAYS_SOFTWARE=0 MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA glxinfo -B`.
+  `MESA_D3D12_DEFAULT_ADAPTER_NAME=NVIDIA` unless you set it yourself.
+- At startup the script prints the renderer it got, e.g.
+  `[INFO] Viewer OpenGL renderer: D3D12 (NVIDIA GeForce RTX 4060 Laptop GPU)`. `llvmpipe` means CPU.
 - Each viewer frame costs about 30 ms on WSL: state goes GPU → host → OpenGL because CUDA–OpenGL sharing isn't
   available, then WSLg ships the frame to Windows. The viewer redraws at `--render_hz` (default 30). Lower it if
   the sim needs to run faster.
