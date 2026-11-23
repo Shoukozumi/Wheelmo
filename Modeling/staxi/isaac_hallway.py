@@ -17,11 +17,13 @@ Add --physics isaacsim_physx to use PhysX instead of Newton (see the note at --p
 
 import argparse
 import os
-import re
+import sys
 import time
 from pathlib import Path
 
 from isaaclab.app import add_launcher_args, launch_simulation
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # isaac_common.py
 
 parser = argparse.ArgumentParser(description="Push the Staxi wheelchair down a hallway.")
 parser.add_argument("--speed", type=float, default=1.2, help="walking pace the attendant pushes to [m/s]")
@@ -45,76 +47,24 @@ if "microsoft" in Path("/proc/version").read_text().lower():
     os.environ.setdefault("MESA_D3D12_DEFAULT_ADAPTER_NAME", "NVIDIA")
 
 import torch  # noqa: E402
-from pxr import Usd, UsdPhysics  # noqa: E402
 from isaaclab_newton.physics import NewtonCfg  # noqa: E402
-from isaaclab_newton.sim.schemas import NewtonArticulationCfg  # noqa: E402
-from isaaclab_physx.sim.schemas import PhysxArticulationCfg  # noqa: E402
 
 import isaaclab.sim as sim_utils  # noqa: E402
-from isaaclab.actuators import ImplicitActuatorCfg  # noqa: E402
-from isaaclab.assets import ArticulationCfg, AssetBaseCfg  # noqa: E402
+from isaaclab.assets import AssetBaseCfg  # noqa: E402
 from isaaclab.scene import InteractiveSceneCfg  # noqa: E402
 from isaaclab.sim import SimulationContext  # noqa: E402
 from isaaclab.utils import instantiate  # noqa: E402
 
-HERE = Path(__file__).resolve().parent
-URDF = HERE / "out" / "staxi_wheelchair.urdf"
-USD = HERE / "out" / "usd" / "staxi_wheelchair" / "staxi_wheelchair.usda"
-CONVERT = f'bash "{HERE / "make_usd.sh"}"'
+from isaac_common import HANDLE, STAXI_CFG, check_usd  # noqa: E402
 
 # hallway: floor from x = -2 m to +18 m, 1.8 m between the walls (hospital corridor)
 HALL_X0, HALL_X1, HALL_W, WALL_H = -2.0, 18.0, 1.8, 2.4
 PUSH_UNTIL_X = 8.0   # attendant lets go here
 BRAKE_FROM_X = 14.0  # ... and stops the chair from here on
-HANDLE = (-0.267, 0.0, 0.998)  # push-handle crossbar in the chair frame [m]
 MAX_PUSH = 40.0      # attendant's maximum push/pull [N]
 PHYSICS_HZ, FRAME_HZ = 240, 60  # physics steps and attendant decisions per second (viewer: up to FRAME_HZ)
 MAX_CATCHUP = 8                 # most physics frames run between two viewer frames when drawing is slow
 OVERVIEW = ([-4.0, 0.0, 2.6], [4.0, 0.0, 0.5])  # camera eye / target: behind the start, down the hallway
-
-# the tyres are rubber: high grip on the floor
-RUBBER = sim_utils.RigidBodyMaterialCfg(static_friction=1.2, dynamic_friction=1.0, restitution=0.0)
-WHEEL_LINK = re.compile(r"(rear|caster|anti_tip)_wheel_[lr]$")
-
-
-def spawn_chair(prim_path, cfg, *args, **kwargs):
-    """Spawn the chair's USD, then bind the rubber material to every wheel's collider (the URDF has no
-    friction, and the USD spawner can't target child prims)."""
-    prim = sim_utils.spawn_from_usd(prim_path, cfg, *args, **kwargs)
-    material = f"{prim.GetPath()}/PhysicsMaterials/rubber"
-    RUBBER.func(material, RUBBER)
-    for p in Usd.PrimRange(prim):
-        if p.HasAPI(UsdPhysics.CollisionAPI) and WHEEL_LINK.search(p.GetParent().GetName()):
-            sim_utils.bind_physics_material(str(p.GetPath()), material)
-    return prim
-
-
-STAXI_CFG = ArticulationCfg(
-    prim_path="{ENV_REGEX_NS}/Wheelchair",
-    # USD converted from the URDF with Isaac Lab's convert_urdf.py (free base, joint drives off)
-    spawn=sim_utils.UsdFileCfg(
-        func=spawn_chair,
-        usd_path=str(USD),
-        articulation_props=[
-            PhysxArticulationCfg(
-                enabled_self_collisions=False,
-                solver_position_iteration_count=8,
-                solver_velocity_iteration_count=1,
-                sleep_threshold=0.0,  # never sleep: a sleeping chair ignores the push
-            ),
-            NewtonArticulationCfg(self_collision_enabled=False),
-        ],
-    ),
-    init_state=ArticulationCfg.InitialStateCfg(pos=(0.0, 0.0, 0.005), joint_pos={".*": 0.0}),
-    # passive joints: no stiffness, only damping; the wheel bearings have very little friction
-    actuators={
-        "wheels": ImplicitActuatorCfg(joint_names_expr=["rear_wheel_.*", "caster_wheel_.*"], stiffness=0.0, damping=1e-4),
-        "casters": ImplicitActuatorCfg(joint_names_expr=["caster_fork_.*"], stiffness=0.0, damping=0.002),
-        # tiny wheels: keep damping tiny too, or they stop between bounces and skid
-        "anti_tip": ImplicitActuatorCfg(joint_names_expr=["anti_tip_wheel_.*"], stiffness=0.0, damping=1e-5),
-        "armrests": ImplicitActuatorCfg(joint_names_expr=["armrest_.*"], stiffness=0.0, damping=0.5),
-    },
-)
 
 
 def box(size, center, color, collide=True):
@@ -157,8 +107,7 @@ def scene_cfg():
 
 
 def main():
-    if not USD.exists() or USD.stat().st_mtime < URDF.stat().st_mtime:
-        raise SystemExit(f"The wheelchair USD is missing or older than the URDF. Run:\n  {CONVERT}")
+    check_usd()
     # the physics config here is a placeholder: the launcher swaps in the --physics choice
     substeps = PHYSICS_HZ // FRAME_HZ
     sim_cfg = sim_utils.SimulationCfg(device=args_cli.device, dt=1 / PHYSICS_HZ, render_interval=substeps,

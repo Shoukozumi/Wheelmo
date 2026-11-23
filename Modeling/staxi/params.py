@@ -38,6 +38,9 @@ BASE_PTS = [(-196, 254, 49), (-101, 254, 61.6), (50, 253, 115.3), (230, 222, 181
 BASE_BEND_R = 60
 BASE_TUBE_W = 22.0   # [scan] oval section, across (horizontal)
 BASE_TUBE_H = 40.0   # [scan] oval section, tall (in the vertical plane through the tube axis)
+BASE_REAR_EXT = dict(x=-168.0, od=27.0)  # [scan] behind x -168 the tube is smaller (28-33 tall incl. noise at x -180, vs 40),
+                                         # its bottom level with the anti-tip wheels and rising at the rounded end (z 43
+                                         # at x -200): modelled round, 27 mm, with a round end
 # Front downtube + seat rail: front corner -> up to the seat front -> back to the post.
 SEAT_RAIL_PTS = [(638, 166, 203), (411, 187, 508), (40, 236, 494), (-76, 253, 455)]  # [scan]
 SEAT_RAIL_BEND_R = 40
@@ -98,6 +101,7 @@ CUSHION_PROFILE = [
 ]                                                                            # [scan]
 CUSHION_HALF_WIDTH_BACK = 228   # [scan] seat 20" wide per [spec]
 CUSHION_HALF_WIDTH_FRONT = 210  # [scan] seat narrows toward the front
+SEAT_COLL_SLABS = [0, 120, 240, 380, 440]  # x edges of the seat's collision boxes (follow CUSHION_PROFILE)
 
 # ---------------------------------------------------------------- brake bar (zip-tied squeezed)
 BRAKE_HINGE = (-178, 662)            # [scan][user: hinge near the lower middle of the backrest] (x, z)

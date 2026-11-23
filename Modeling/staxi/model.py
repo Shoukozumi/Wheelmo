@@ -41,6 +41,33 @@ def oval_tube(points, w, h, bend_r):
     return sweep(Plane(origin=path @ 0, x_dir=x_dir, z_dir=t0) * Ellipse(w / 2, h / 2), path), path
 
 
+def oval_capsules(path, w, h, step=25.0):
+    """Collision for a swept oval tube (see oval_tube): per segment, two capsules of diameter w side by side
+    along the oval's deep axis, so together they cover the w x h section (a capsule of the section's average
+    size would be too fat across and too thin deep). The deep axis is carried along the path by parallel
+    transport, as the sweep's rotation-minimising profile frame is."""
+    n = max(1, math.ceil(path.length / step))
+    us = [i / n for i in range(n + 1)]
+    pts = [path.position_at(u) for u in us]
+    tans = [path.tangent_at(u).normalized() for u in us]
+    x_dir = Vector(0, 0, 1).cross(tans[0]).normalized()
+    deep = [tans[0].cross(x_dir).normalized()]
+    for ta, tb in zip(tans, tans[1:]):
+        d, k = deep[-1], ta.cross(tb)
+        if k.length > 1e-9:  # rotate d about k by the angle between the tangents (Rodrigues)
+            kh, ang = k.normalized(), math.atan2(k.length, ta.dot(tb))
+            d = d * math.cos(ang) + kh.cross(d) * math.sin(ang) + kh * (kh.dot(d) * (1 - math.cos(ang)))
+        d = (d - tb * d.dot(tb)).normalized()
+        deep.append(d)
+    off = (h - w) / 2
+    out = []
+    for i in range(n):
+        for sgn in (-1, 1):
+            a, b = pts[i] + deep[i] * (sgn * off), pts[i + 1] + deep[i + 1] * (sgn * off)
+            out.append(dict(type="cylinder", a=tuple(a), b=tuple(b), r=w / 2))
+    return out
+
+
 def base_y_at(x):
     """|y| of the base tube's centre line at x (straight-segment interpolation)."""
     pts = P.BASE_PTS
@@ -121,13 +148,19 @@ def build_frame(brake_squeezed=True):
     solid, path = oval_tube([sym(pb, -1), sym(pc, -1), sym(pc, 1), sym(pb, 1)], P.POST_TUBE_W, P.POST_TUBE_H,
                             P.PUSH_BEND_R)
     parts.append(solid)
-    coll.extend(capsule_segments(path, P.POST_TUBE_W + 8))
+    coll.extend(oval_capsules(path, P.POST_TUBE_W, P.POST_TUBE_H))
 
     for s in (1, -1):
-        # oval base tube (collision: capsules); ellipsoid cap where it meets the front downtube
-        solid, path = oval_tube([sym(p, s) for p in P.BASE_PTS], P.BASE_TUBE_W, P.BASE_TUBE_H, P.BASE_BEND_R)
+        # base tube: a round rear extension (the anti-tip fork's end), then the oval tube forward to the front
+        # corner (collision: paired capsules); ellipsoid cap where it meets the front downtube
+        (xa, ya, za), (xb, yb, zb) = P.BASE_PTS[0], P.BASE_PTS[1]
+        f = (P.BASE_REAR_EXT["x"] - xa) / (xb - xa)
+        split = (P.BASE_REAR_EXT["x"], ya + f * (yb - ya), za + f * (zb - za))
+        add([sym(P.BASE_PTS[0], s), sym(split, s)], P.BASE_REAR_EXT["od"], caps=True)
+        solid, path = oval_tube([sym(split, s)] + [sym(p, s) for p in P.BASE_PTS[1:]], P.BASE_TUBE_W, P.BASE_TUBE_H,
+                                P.BASE_BEND_R)
         parts.append(solid)
-        coll.extend(capsule_segments(path, P.BASE_TUBE_W + 8))
+        coll.extend(oval_capsules(path, P.BASE_TUBE_W, P.BASE_TUBE_H))
         parts.append(Pos(*sym(P.BASE_PTS[-1], s)) * scale(Sphere(1), by=(P.BASE_TUBE_W / 2, P.BASE_TUBE_W / 2,
                                                                         P.BASE_TUBE_H / 2)))
         # anti-tip wheel fork on the rear end of the base tube: two cheeks + axle bolt
@@ -149,7 +182,7 @@ def build_frame(brake_squeezed=True):
         solid, path = oval_tube([a + ud * P.DOWNTUBE_BELOW_CORNER + shift, b + ud * 21 + shift],
                                 P.DOWNTUBE_W, P.DOWNTUBE_H, 1)
         parts.append(solid)
-        coll.extend(capsule_segments(path, P.DOWNTUBE_W + 6))
+        coll.extend(oval_capsules(path, P.DOWNTUBE_W, P.DOWNTUBE_H, step=40.0))
         # footrest: one closed tube, the outer end bent up into a U welded round the downtube
         path = footrest_path(s)
         parts.append(sweep((path ^ 0) * Circle(P.FOOTREST_TUBE_OD / 2), path))
@@ -201,7 +234,17 @@ def build_frame(brake_squeezed=True):
     except Exception:  # noqa: BLE001 - cosmetic rounding only
         pass
     # cushion collision: seat box + back box (oriented along the backrest)
-    coll.append(dict(type="box", center=(220, 0, 518), size=(440, 2 * wb, 75), rpy=(0, 0, 0)))
+    # seat: one box per x slab, from the lowest underside to the highest top of the measured profile in that
+    # slab (one box for the whole seat reached 7.5 mm below the cushion at the back, where stacked chairs meet)
+    prof = P.CUSHION_PROFILE + P.CUSHION_PROFILE[:1]
+    dense = [(xa + (xb - xa) * f / 20, za + (zb - za) * f / 20)
+             for (xa, za), (xb, zb) in zip(prof, prof[1:]) for f in range(20)]
+    for sx0, sx1 in zip(P.SEAT_COLL_SLABS, P.SEAT_COLL_SLABS[1:]):
+        zs = [z for x, z in dense if sx0 <= x <= sx1 and z < 570]
+        z0, z1 = min(zs), max(zs)
+        half = wb if sx0 < 60 else wb + (wf - wb) * (sx0 - 60) / (x1 - 60)   # the seat narrows toward the front
+        coll.append(dict(type="box", center=((sx0 + sx1) / 2, 0, (z0 + z1) / 2), size=(sx1 - sx0, 2 * half, z1 - z0),
+                         rpy=(0, 0, 0)))
     bx0, bz0, bx1, bz1 = -45, 590, -180, 950  # backrest mid-surface line
     ang = math.atan2(bx0 - bx1, bz1 - bz0)
     coll.append(dict(type="box", center=((bx0 + bx1) / 2, 0, (bz0 + bz1) / 2),

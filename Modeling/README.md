@@ -58,6 +58,8 @@ bash run_hallway.sh --viz viser                    # Isaac Lab hallway demo, bro
 | `staxi/isaac_hallway.py` | Isaac Lab demo: push the chair down a hallway, or drag it yourself |
 | `staxi/make_usd.sh` | URDF -> USD (clears the old copy; Isaac's importer never overwrites) |
 | `staxi/run_hallway.sh` | runs `isaac_hallway.py` in the Isaac Lab environment, from any folder |
+| `staxi/isaac_stack.py`, `staxi/run_stack.sh` | Isaac Lab stacking test: push N chairs into each other and measure how far they nest |
+| `staxi/isaac_common.py` | the chair's Isaac Lab articulation config (passive joints, rubber tyres), shared by both scenes |
 | `staxi/view.py` | live 3D view in VS Code (OCP CAD Viewer) |
 | `staxi/clean_scan.py` | raw scan OBJ -> floor removed, aligned STL |
 | `staxi/scan_tools.py` | scan -> model frame (scale, axes), point-splat renderer |
@@ -127,6 +129,9 @@ bash run_hallway.sh --viz viser                    # Isaac Lab hallway demo, bro
    - The cushion is one moulded L-profile.
    - Each moving part is its own link.
    - Collision shapes are primitives only: cylinders per tube segment and per wheel, boxes for the cushion.
+     Oval tubes get two cylinders side by side along the oval's deep axis, and the seat gets one box per
+     slice following the measured cushion profile. Single averaged shapes were a few mm off, which decides
+     where stacked chairs meet.
 6. **Exports** (`build.py`):
    - Masses from the Staxi spec, 57 lb (25.9 kg) total, split by estimated part masses.
    - Inertias from the geometry, with the foam cushion (solid) and the metal handled separately. The
@@ -370,6 +375,37 @@ Options:
 - `--loops N`: stop after N runs down the hallway.
 - `--fast`: don't hold to real time.
 
+### Stacking test
+
+```bash
+bash staxi/run_stack.sh --viz newton_gl --hold        # 10 chairs, desktop window, stays open at the end
+bash staxi/run_stack.sh --chairs 2 --fast             # headless, two chairs
+```
+
+How it works:
+1. N chairs (`--chairs`, default 10) stand in a row facing the same way, the front one against a wall.
+2. From the front, an "attendant" pushes each next chair in on its push handle at 0.4 m/s (`--speed`), with at
+   most 80 N (`--force`), until it won't go any further.
+3. The attendant lets go, the stack settles, and the next chair comes in.
+4. The script prints each chair's stacking pitch (rear axle to rear axle), whether it rode up or tipped, and
+   the length of the whole stack.
+
+All chairs share one environment: chairs in different environments don't collide in Isaac Lab. They also
+share that environment's contact budget, so the script raises it (120 contacts per chair). The default
+budget overflowed and silently dropped contacts.
+
+Result (2026-11-23):
+- The chairs nest without riding up or tipping. Each nests about 560 mm into the one ahead: a pitch of
+  459–468 mm against a chair length of 1,025 mm.
+- Ten chairs take 5.16 m instead of 10.25 m end to end.
+- **What stops them:** each chair's front downtube, near where it turns into the seat rail (about 480 mm up),
+  meets the underside of the seat ahead at its rear edge.
+- Before the collision shapes were made faithful, the armrests caught on the posts of the chair ahead
+  instead. That contact doesn't happen with the real 24 mm-wide posts.
+- Not modelled: anything on the real chair that moves when stacking (for example a seat that lifts). If the
+  real chairs nest deeper than about 560 mm, that's the place to look. Measure the axle-to-axle distance of
+  two nested real chairs to check this result.
+
 **Newton GL window controls:**
 - Right-click drag pulls the part under the cursor with a stiff, damped spring: force ≈ (10 + part mass) ×
   50 N/m × drag distance.
@@ -439,6 +475,10 @@ What we learned getting it running:
   unloaded tread circle (r 101) then reaches 3.5 mm below the CAD floor, so in simulation the chair rests
   3.5 mm higher at the back (0.4° nose-down).
 - **Rolling resistance:** none modelled beyond the bearings, so the chair coasts almost without slowing.
+- **Base tube rear end:** behind x −168 the base tube is smaller in the scan (about 28–33 mm tall, against
+  40). It's modelled as a 27 mm round tube with a rounded end, so the anti-tip wheels touch down first, as on
+  the real chair.
+- **Stacking pitch:** 462 mm in simulation (see **Stacking test**); not yet compared with real chairs.
 - **Not modelled:** the label patch on the backrest; the texture colours (all colours are hand-picked).
 
 ## Using the model elsewhere
